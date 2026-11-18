@@ -1,0 +1,31 @@
+name: wif-probe
+on: push
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: projects/956073807168/locations/global/workloadIdentityPools/my-pool/providers/my-provider
+          service_account: deploy-cloud-functions@nutmeg-9099c.iam.gserviceaccount.com
+      - name: claims
+        run: |
+          echo "idtoken claims:"; echo '${{ steps.auth.outputs.id_token }}' | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null; echo
+      - name: whoami
+        run: |
+          gcloud auth list 2>&1 | head -5
+          T=$(gcloud auth print-access-token 2>/dev/null)
+          echo "TOKLEN=${#T}"
+          echo "--- testIamPermissions ---"
+          curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"permissions":["aiplatform.customJobs.create","compute.instances.create","compute.instances.setMetadata","container.clusters.getCredentials","serviceusage.services.enable","iam.serviceAccounts.actAs","iam.serviceAccounts.getAccessToken","resourcemanager.projects.get","resourcemanager.projects.getIamPolicy","cloudfunctions.functions.create","cloudfunctions.functions.update","run.services.create","appengine.apps.update","storage.buckets.create","cloudbilling.resourceAssociations.create"]}' "https://cloudresourcemanager.googleapis.com/v1/projects/nutmeg-9099c:testIamPermissions"
+          echo
+          echo "--- billingInfo ---"
+          curl -s -H "Authorization: Bearer $T" "https://cloudbilling.googleapis.com/v1/projects/nutmeg-9099c/billingInfo"
+          echo
+          echo "--- serviceusage aiplatform ---"
+          curl -s -H "Authorization: Bearer $T" "https://serviceusage.googleapis.com/v1/projects/nutmeg-9099c/services/aiplatform.googleapis.com"
+          echo
