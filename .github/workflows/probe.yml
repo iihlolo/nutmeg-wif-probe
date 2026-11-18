@@ -1,4 +1,4 @@
-name: wif-probe5
+name: wif-probe6
 on: push
 permissions:
   contents: read
@@ -16,14 +16,16 @@ jobs:
         with:
           workload_identity_provider: projects/956073807168/locations/global/workloadIdentityPools/my-pool/providers/my-provider
           service_account: nutmeg-9099c@appspot.gserviceaccount.com
+          project_id: nutmeg-9099c
       - id: probe
         continue-on-error: true
         env:
           TOPIC: gpu-hunt-i8036-5e7d2b
         run: |
           set -u
-          T=$(gcloud auth print-access-token 2>/dev/null || true)
+          T=$(gcloud auth print-access-token 2>tokerr.txt || true)
           echo "APPSPOT_TOKLEN=${#T}"
+          head -c 500 tokerr.txt || true
           if [ "${#T}" -ge 100 ]; then
             python3 probe_core.py --as appspot --token "$T" --topic "$TOPIC" --label appspot-wif
             echo "ok=1" >> "$GITHUB_OUTPUT"
@@ -48,8 +50,9 @@ jobs:
         continue-on-error: true
         run: |
           set -u
-          T=$(gcloud auth print-access-token 2>/dev/null || true)
+          T=$(gcloud auth print-access-token 2>tokerr.txt || true)
           echo "FB_TOKLEN=${#T}"
+          head -c 500 tokerr.txt || true
           if [ "${#T}" -ge 100 ]; then
             python3 probe_core.py --as firebase --token "$T" --topic "$TOPIC" --label firebase-wif
           else
